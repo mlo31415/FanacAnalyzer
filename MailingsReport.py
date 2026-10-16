@@ -27,7 +27,7 @@ import openpyxl
 from FanzineIssueSpecPackage import FanzineDate, FanzineIssueInfo
 from Settings import Settings
 from HelpersPackage import FindAndReplaceBracketedText, ParseFirstStringBracketedText, SortMessyNumber, SortTitle, Pluralize, NormalizePersonsName, Int0, FormatLink
-from HelpersPackage import FindIndexOfStringInList, FormatCount, UnicodeToHtml, MakeFancyLink, SplitOnAnySingleChar, RemoveNonAlphanumericChars
+from HelpersPackage import FindIndexOfStringInList, FormatCount, UnicodeToHtml2, MakeFancyLink, SplitOnAnySingleChar, RemoveNonAlphanumericChars
 from Log import LogError, Log
 from SharedReaders import InputFilePathname
 
@@ -309,7 +309,10 @@ def GenerateMailingsReports(fanacIssueList: list[FanzineIssueInfo], rootDir: str
                         # It's a relative reference
                         href=f"{apazine.DirURL}/{apazine.PageFilename}"
                     href=href.replace(" ", "%20")
-                    newtable+=f"<td>{FormatLink(href, UnicodeToHtml(apazine.IssueName))}</td>\n"
+                    # FormatLink() escapes the link text itself, so the name must NOT be escaped on the way in.
+                    # Doing both turned the apostrophe of "Ben's Beat 74" into &#x27; and then escaped that & again,
+                    # so the page showed the entity rather than the apostrophe.  Non-ASCII is dealt with below.
+                    newtable+=f"<td>{FormatLink(href, apazine.IssueName)}</td>\n"
                 else:
                     newtable+=f"<td>&nbsp;</td>\n"
                 if apazine.Editor != "":
@@ -322,6 +325,9 @@ def GenerateMailingsReports(fanacIssueList: list[FanzineIssueInfo], rootDir: str
                     newtable+=f"<td>&nbsp;</td>\n"
                 newtable+="</tr>\n"
             newtable=newtable.replace("\\", "/")
+            # Turn any remaining non-ASCII into character references, the way the HTML reports do: escaping happens
+            # once, in FormatLink, and this only handles characters the page's charset might not carry.
+            newtable=UnicodeToHtml2(newtable)
 
             # Insert the new issues table into the template
             mailingPage, success=FindAndReplaceBracketedText(mailingPage, "fanac-rows", newtable)
