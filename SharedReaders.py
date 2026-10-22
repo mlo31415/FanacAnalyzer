@@ -329,6 +329,21 @@ def ExtractMailings(columnHeaders: list[str], row: list[TextAndHref]) -> list[st
 
 
 #==============================================================================
+# A number is sometimes written with its letter in front -- 'a18' rather than '18a'.  InterpretNumber can't read
+# that, and FanzineSerial has nowhere to put a leading letter, so split it up: the digits to be read as the number,
+# the letters to be stored as its suffix.
+# Only when the letters are all in front: '18a' is already the shape FanzineSerial wants, and something like 'a18b'
+# is left alone to be logged as an uninterpretable number.
+def SplitLeadingAlpha(text: str|None) -> tuple[str|None, str]:
+    if text is None:
+        return None, ""
+    m=re.match(r"^([a-zA-Z]+)([0-9]+)$", text.strip())
+    if m is None:
+        return text, ""
+    return m.groups()[1], m.groups()[0]
+
+
+#==============================================================================
 # Given the contents of various table columns, attempt to extract serial information
 # This uses InterpretSerial for detailed decoding
 def ExtractSerialNumber(volText: str, numText: str, wholeText: str, volNumText: str, titleText: str) -> FanzineSerial:
@@ -338,6 +353,10 @@ def ExtractSerialNumber(volText: str, numText: str, wholeText: str, volNumText: 
     numsuffix=None
     maybeWholeInt=None
     wsuffix=None
+
+    # Turn any leading-alpha number round before anything below tries to read it, keeping the letters for the suffix
+    numText, numprefix=SplitLeadingAlpha(numText)
+    wholeText, wholeprefix=SplitLeadingAlpha(wholeText)
 
     if wholeText is not None:
         wholeInt=InterpretNumber(wholeText)
@@ -411,6 +430,16 @@ def ExtractSerialNumber(volText: str, numText: str, wholeText: str, volNumText: 
 
             numsuffix=ser.NumSuffix
             wsuffix=ser.WSuffix
+
+    # The letters off a leading-alpha number become the suffix of whichever field that number ended up in.  (A
+    # number column with no volume beside it is read as the whole number, so it can land in either.)
+    if wholeprefix != "":
+        wsuffix=wholeprefix
+    if numprefix != "":
+        if numInt is not None:
+            numsuffix=numprefix
+        elif wholeInt is not None:
+            wsuffix=numprefix
 
     return FanzineSerial(Vol=volInt, Num=numInt, NumSuffix=numsuffix, Whole=wholeInt, WSuffix=wsuffix)
 
