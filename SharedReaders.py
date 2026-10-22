@@ -62,7 +62,11 @@ class TextAndHref:
 
         # No, if it's a single link. Convert it to a TextAndHref
         _, self.Url, self.Text, _=FindHrefInString(text)
-        if self.Url != "" and self.Text != "":  # Did FindHrefInString find a link?
+        if self.Url != "":
+            # A link.  Its text may be empty -- some index pages carry <a href="xxx.pdf"></a> with nothing between
+            # the tags -- and that is still a link, not plain text.  Falling through here used to put the cell's raw
+            # HTML into Text, so the report displayed '<a href="SAPS 6 Ballot 1948-Wi SAPS 6.pdf"></A>' as the name
+            # of the fanzine issue.  The caller fills an empty name from another column.
             return
 
         # Just plain text, I guess
@@ -271,9 +275,17 @@ def ExtractIssueNameAndHref(columnHeaders: list[str], row: list[TextAndHref]) ->
     if issue.IsEmpty():
        return TextAndHref("<not found>", "")
 
-    # If we already have found a URL, we're done.
-    if issue.Url != "":
+    # If we already have found a URL, we're done -- unless the link had no text between its tags, in which case the
+    # issue's name has to come from one of the other columns while we keep the link we found.
+    if issue.Url != "" and issue.Text != "":
         return issue
+    if issue.Url != "":
+        # "Display Text" is what fanac.org's own tables call the column holding the issue's full name, and is where
+        # these pages put it when the link itself is left empty.
+        name=GetCellValueByColHeader(columnHeaders, row, ["Display Text", "Title", "Text"])
+        if name.Text != "":
+            return TextAndHref(name.Text, issue.Url)
+        return TextAndHref("<not found>", issue.Url)
 
     # We now know the there is no URL.  If there's no text, either, return an empty TextAndHref
     if issue.Text == "":
