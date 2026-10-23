@@ -329,18 +329,22 @@ def ExtractMailings(columnHeaders: list[str], row: list[TextAndHref]) -> list[st
 
 
 #==============================================================================
-# A number is sometimes written with its letter in front -- 'a18' rather than '18a'.  InterpretNumber can't read
-# that, and FanzineSerial has nowhere to put a leading letter, so split it up: the digits to be read as the number,
-# the letters to be stored as its suffix.
-# Only when the letters are all in front: '18a' is already the shape FanzineSerial wants, and something like 'a18b'
-# is left alone to be logged as an uninterpretable number.
-def SplitLeadingAlpha(text: str|None) -> tuple[str|None, str]:
+# A number is often written with letters attached -- '18a', and once on the site the other way round as 'a18'.
+# Nothing read a suffix off the number columns: InterpretNumber turned '18a' into 18 and threw the letter away,
+# and it couldn't read 'a18' at all.  Split them up here: the digits to be read as the number, the letters to be
+# stored as its suffix.
+# Letters at one end only.  Something like 'a18b' is left alone, to be logged as an uninterpretable number.
+def SplitAlphaFromNumber(text: str|None) -> tuple[str|None, str]:
     if text is None:
         return None, ""
-    m=re.match(r"^([a-zA-Z]+)([0-9]+)$", text.strip())
-    if m is None:
-        return text, ""
-    return m.groups()[1], m.groups()[0]
+    text=text.strip()
+    m=re.match(r"^([0-9]+)([a-zA-Z]+)$", text)          # 18a, the usual way round
+    if m is not None:
+        return m.groups()[0], m.groups()[1]
+    m=re.match(r"^([a-zA-Z]+)([0-9]+)$", text)          # a18
+    if m is not None:
+        return m.groups()[1], m.groups()[0]
+    return text, ""
 
 
 #==============================================================================
@@ -354,9 +358,11 @@ def ExtractSerialNumber(volText: str, numText: str, wholeText: str, volNumText: 
     maybeWholeInt=None
     wsuffix=None
 
-    # Turn any leading-alpha number round before anything below tries to read it, keeping the letters for the suffix
-    numText, numprefix=SplitLeadingAlpha(numText)
-    wholeText, wholeprefix=SplitLeadingAlpha(wholeText)
+    # Take the letters off a number like '18a' before anything below tries to read it, keeping them for the suffix.
+    # The digits are kept too: numText is cleared below when it turns out to be the whole number.
+    numText, numalpha=SplitAlphaFromNumber(numText)
+    wholeText, wholealpha=SplitAlphaFromNumber(wholeText)
+    numDigits, wholeDigits=numText, wholeText
 
     if wholeText is not None:
         wholeInt=InterpretNumber(wholeText)
@@ -431,15 +437,18 @@ def ExtractSerialNumber(volText: str, numText: str, wholeText: str, volNumText: 
             numsuffix=ser.NumSuffix
             wsuffix=ser.WSuffix
 
-    # The letters off a leading-alpha number become the suffix of whichever field that number ended up in.  (A
-    # number column with no volume beside it is read as the whole number, so it can land in either.)
-    if wholeprefix != "":
-        wsuffix=wholeprefix
-    if numprefix != "":
-        if numInt is not None:
-            numsuffix=numprefix
-        elif wholeInt is not None:
-            wsuffix=numprefix
+    # The letters taken off a number become the suffix of whichever field that number ended up in.  (A number
+    # column with no volume beside it is read as the whole number, so it can land in either.)  The column says
+    # this more directly than the title does, so it wins over a suffix picked out of the title above.
+    # But only while the number itself is still the one the letters were written on: the title can replace it
+    # (BSFA Bulletin's Whole column says '32s' while its title ends "Info 4"), and then they aren't its letters.
+    if wholealpha != "" and wholeInt is not None and str(wholeInt) == wholeDigits:
+        wsuffix=wholealpha
+    if numalpha != "":
+        if numInt is not None and str(numInt) == numDigits:
+            numsuffix=numalpha
+        elif wholeInt is not None and str(wholeInt) == numDigits:
+            wsuffix=numalpha
 
     return FanzineSerial(Vol=volInt, Num=numInt, NumSuffix=numsuffix, Whole=wholeInt, WSuffix=wsuffix)
 
