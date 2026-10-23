@@ -358,14 +358,14 @@ def ExtractSerialNumber(volText: str, numText: str, wholeText: str, volNumText: 
     maybeWholeInt=None
     wsuffix=None
 
-    # Take the letters off a number like '18a' before anything below tries to read it, keeping them for the suffix.
-    # The digits are kept too: numText is cleared below when it turns out to be the whole number.
+    # Take the letters off a number like '18a' before anything below tries to read it, keeping them for the suffix
     numText, numalpha=SplitAlphaFromNumber(numText)
     wholeText, wholealpha=SplitAlphaFromNumber(wholeText)
-    numDigits, wholeDigits=numText, wholeText
+    numFromColumn=None      # What each column's own number came to, remembered because the title can replace it below
 
     if wholeText is not None:
         wholeInt=InterpretNumber(wholeText)
+    wholeFromColumn=wholeInt
 
     if volNumText is not None:
         ser=FanzineSerial().Match(volNumText)
@@ -382,11 +382,13 @@ def ExtractSerialNumber(volText: str, numText: str, wholeText: str, volNumText: 
         with suppress(Exception):
             maybeWholeText=numText
             maybeWholeInt=int(maybeWholeText)
+            numFromColumn=maybeWholeInt
             numText=None
 
     # But if there *is* a volume specified, than any number not labelled "whole" must be a number within the volume
     if volText is not None and numText is not None:
         numInt=InterpretInteger(numText)
+        numFromColumn=numInt
 
     # OK, now figure out the vol, num and whole.
     # First, if a Vol is present, and an unambigious Num is absent, the an ambigious Num must be the Vol's num
@@ -442,12 +444,12 @@ def ExtractSerialNumber(volText: str, numText: str, wholeText: str, volNumText: 
     # this more directly than the title does, so it wins over a suffix picked out of the title above.
     # But only while the number itself is still the one the letters were written on: the title can replace it
     # (BSFA Bulletin's Whole column says '32s' while its title ends "Info 4"), and then they aren't its letters.
-    if wholealpha != "" and wholeInt is not None and str(wholeInt) == wholeDigits:
+    if wholealpha != "" and wholeInt is not None and wholeInt == wholeFromColumn:
         wsuffix=wholealpha
-    if numalpha != "":
-        if numInt is not None and str(numInt) == numDigits:
+    if numalpha != "" and numFromColumn is not None:
+        if numInt == numFromColumn:
             numsuffix=numalpha
-        elif wholeInt is not None and str(wholeInt) == numDigits:
+        elif wholeInt == numFromColumn:
             wsuffix=numalpha
 
     return FanzineSerial(Vol=volInt, Num=numInt, NumSuffix=numsuffix, Whole=wholeInt, WSuffix=wsuffix)
