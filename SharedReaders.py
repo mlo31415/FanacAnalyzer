@@ -90,6 +90,23 @@ class TextAndHref:
 
 
 #=================================================
+#==============================================================================
+# Does this href point into some *other* fanzine's directory on fanac.org?
+# Such a row is that other fanzine's issue, listed here for the reader's convenience.  It is counted under the
+# fanzine it belongs to, so counting it here as well would count it twice.
+# Only under /fanzines/: a link elsewhere on fanac.org, or off the site altogether, is a different kind of thing
+# and is left alone.  The scheme is often missing -- FindLinkInString drops it, so '//fanac.org/fanzines/...' is
+# the commonest form of these by far.
+def IsLinkToAnotherFanzinesDirectory(url: str, dirname: str) -> bool:
+    m=re.match(r"^(?:https?:)?//(?:www\.)?fanac\.org(/.*)$", url.strip(), flags=re.IGNORECASE)
+    if m is None:
+        return False
+    parts=[x for x in m.groups()[0].split("/") if x != ""]
+    if len(parts) < 2 or parts[0].lower() != "fanzines":
+        return False        # Somewhere else on fanac.org
+    return parts[1].lower() != dirname.lower()
+
+
 def DecodeTableRow(columnHeaders: list[str], tableRow: list[TextAndHref], iRow: int, defaultcountry: str, defaultEditor: str, fanzineType: str, alphabetizeIndividually: bool, directoryUrl: str) -> FanzineIssueInfo|None:
     # We need to extract the name, url, year, and vol/issue info for each fanzine
     # We have to treat the Text column specially, since it contains the critical href we need.
@@ -114,6 +131,13 @@ def DecodeTableRow(columnHeaders: list[str], tableRow: list[TextAndHref], iRow: 
     # change the value of directoryURL for this fanzine.
     dirUrl=directoryUrl
     dir=urllib.parse.urlparse(dirUrl).path.split("/")[2]
+
+    # A row linking into another fanzine's directory belongs to that fanzine, not this one.  (The link to another
+    # fanzine's index page is already dealt with above; this is the link to one of its issues.)
+    if title.Url != "" and IsLinkToAnotherFanzinesDirectory(title.Url, dir):
+        Log(f"   Skipped: '{title.Text}' links to '{title.Url}', which is another fanzine's directory")
+        return None
+
     if title.Url != "":
         if title.Url.startswith(directoryUrl):
             title.Url=title.Url.replace(directoryUrl, "")
