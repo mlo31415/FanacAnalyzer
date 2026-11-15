@@ -3,8 +3,9 @@ import re
 import time
 import tkinter as tk
 from tkinter import messagebox
+from dataclasses import dataclass, field
 
-from SharedReaders import TextAndHref, FetchFileFromServer, DecodeTableRow, InputFilePathname
+from SharedReaders import TextAndHref, FetchFileFromServer, DecodeTableRow, InputFilePathname, GetCellValueByColHeader
 
 from FanzineIssueSpecPackage import FanzineIssueInfo, FanzineSeriesInfo
 from FanzineIssueSpecPackage import FanzineCounts
@@ -430,6 +431,21 @@ def ReadFanacFanzineIndexPageOld(fanzineName: str, directoryUrl: str, html: str)
 
 
 #=========================================================================================
+# What a FIP's own numbering columns said, which is something the reports cannot get from FanzineIssueInfo:
+# a FanzineSerial's Whole may have been inferred from the issue's title on a page which has no Whole column at
+# all, and the two numbering reports need to tell those two cases apart.  ExtractFanzineIndexTableInfo() fills
+# this in as it reads each page and FanacAnalyzer reads it back when it generates the reports.
+# Note that this is built during the read, so it is empty on a run using the saved fanzine list.
+@dataclass
+class SeriesNumbering:
+    HasWholeColumn: bool=False      # Is one of the page's columns the one FA reads as the whole number?
+    HasNumberColumn: bool=False     # ...or as the issue number?  (Tells a never-numbered series from a sloppily-numbered one.)
+    Rows: list[tuple[str, str]]=field(default_factory=list)     # (issue name, the row's Whole cell exactly as written), in page order
+
+gSeriesNumbering: dict[str, SeriesNumbering]={}     # Keyed by the series' directory URL
+
+
+#=========================================================================================
 # Read a fanzine's page of any format
 def ExtractFanzineIndexTableInfo(directoryUrl: str, html: str, editor: str, defaultcountry: str, fanzineType: str= "",
     alphabetizeIndividually: bool=False, useNewTableStructure: bool=False) -> list[FanzineIssueInfo]:
@@ -465,6 +481,12 @@ def ExtractFanzineIndexTableInfo(directoryUrl: str, html: str, editor: str, defa
         bodyTable, row=ReadTableRow(headerTable, "TH", directoryUrl)
 
     columnHeaders: list[str]=[CanonicizeColumnHeaders(c.Text) for c in row] # Canonicize and return to being just a str list
+
+    # Remember the page's numbering columns for the two numbering reports.  (See SeriesNumbering, above.)
+    # columnHeaders has already been canonicized, so these are the same names GetCellValueByColHeader() matches.
+    numbering=SeriesNumbering(HasWholeColumn="Whole" in columnHeaders,
+                              HasNumberColumn=any(x in columnHeaders for x in ("Number", "VolNum", "Vol+Num")))
+    gSeriesNumbering[directoryUrl]=numbering
 
     # The mailing column may contain hyperlinks.  Suppress them, leaving only the link text.
     mailingCol=None
@@ -508,6 +530,9 @@ def ExtractFanzineIndexTableInfo(directoryUrl: str, html: str, editor: str, defa
         fi=DecodeTableRow(columnHeaders, tableRow, iRow, defaultcountry, editor, fanzineType, alphabetizeIndividually, directoryUrl)
         if fi is None:
             continue
+
+        wholeText=GetCellValueByColHeader(columnHeaders, tableRow, "Whole").Text
+        numbering.Rows.append((fi.IssueName, wholeText.strip() if wholeText is not None else ""))
 
         # Append it and log it.
         Log(f"   {fi=}")

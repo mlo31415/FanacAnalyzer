@@ -14,7 +14,7 @@ import jsonpickle
 import urllib.parse
 import tkinter as tk
 from tkinter import scrolledtext
-from collections import defaultdict
+from collections import defaultdict, Counter
 from difflib import SequenceMatcher
 
 import FanacOrgReaders
@@ -639,6 +639,55 @@ def main():
 
     #-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
     #-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+    # The two whole-number reports: which issues a series is missing, and which series we cannot tell about
+    # because the page's numbering cannot be read.  Both come out of a single pass over the series.
+    neededNumbering, annoyingNumbering=AnalyzeSeriesNumbering(fanacIssueList)
+
+    report="Fanzines Needed to Complete a Series.html"
+    if len(reportsToRun) == 0 or report in reportsToRun:
+        Log(f"Begin Report: '{report}'", timestamp=True)
+        # The row text is looked up by the series' URL because WriteHTMLTable's lambdas are handed only the issue.
+        rowText={fz.Series.DirURL: text for fz, text in neededNumbering}
+        seriesList=sorted([fz for fz, _ in neededNumbering], key=SeriesSortKey)
+        WriteHTMLTable(os.path.join(reportFilePath, report),
+                       seriesList,
+                       fBodyURL=lambda fz: fz.Series.DirURL,
+                       fButtonText=SeriesButtonText,
+                       #
+                       fGroupURL=lambda fz: fz.Series.DirURL,
+                       fGroupText=lambda fz: fz.Series.SeriesName,
+                       includeRowHeaderCounts=False,
+                       #
+                       fRowText=lambda fz: "missing "+rowText[fz.Series.DirURL],
+                       #
+                       topCountText=f"{len(seriesList):,} fanzine series with gaps in the whole numbers.\n"+timestamp+"\n",
+                       reportFilename="control-Header (Needed to complete a series).html",
+                       inAlphaOrder=True)
+        Log(f"Complete: {report}", timestamp=True)
+
+    report="Fanzines Series with Annoying numbering.html"
+    if len(reportsToRun) == 0 or report in reportsToRun:
+        Log(f"Begin Report: '{report}'", timestamp=True)
+        rowText={fz.Series.DirURL: text for fz, text in annoyingNumbering}
+        seriesList=sorted([fz for fz, _ in annoyingNumbering], key=SeriesSortKey)
+        WriteHTMLTable(os.path.join(reportFilePath, report),
+                       seriesList,
+                       fBodyURL=lambda fz: fz.Series.DirURL,
+                       fButtonText=SeriesButtonText,
+                       #
+                       fGroupURL=lambda fz: fz.Series.DirURL,
+                       fGroupText=lambda fz: fz.Series.SeriesName,
+                       includeRowHeaderCounts=False,
+                       #
+                       fRowText=lambda fz: rowText[fz.Series.DirURL],
+                       #
+                       topCountText=f"{len(seriesList):,} fanzine series whose whole numbers cannot be read.\n"+timestamp+"\n",
+                       reportFilename="control-Header (Annoying numbering).html",
+                       inAlphaOrder=True)
+        Log(f"Complete: {report}", timestamp=True)
+
+    #-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+    #-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
     # Compute counts of issues and series by decade.
     # We get the issue numbers by simply going through the list and adding one to the appropriate decade.
     # For series, we create a set of series found for that decade
@@ -704,6 +753,119 @@ def main():
     Log("FanacAnalyzer has Completed.")
 
     LogClose()
+
+
+# Series with fewer than this many issues are not tested for orderly numbering.  A one- or two-issue series
+# says nothing about whether its numbering runs in order, and listing them all would bury the pages which can
+# actually be fixed.
+gMinIssuesToTestNumbering=3
+
+
+# ====================================================================================
+# The jump-button letter (and the sort key) for a report whose rows are fanzine series rather than issues.
+def SeriesSortKey(fz: FanzineIssueInfo) -> str:
+    return FlattenTextForSorting(fz.Series.SeriesName, RemoveLeadingArticles=True).strip()
+
+
+def SeriesButtonText(fz: FanzineIssueInfo) -> str:
+    key=SeriesSortKey(fz)
+    return key[0].upper() if key != "" else "?"
+
+
+# ====================================================================================
+# Render a list of numbers the way a reader can take it in at a glance: a run of three or more becomes "12-27".
+def CompressRuns(nums: list[int]) -> str:
+    out: list[str]=[]
+    i=0
+    while i < len(nums):
+        j=i
+        while j+1 < len(nums) and nums[j+1] == nums[j]+1:
+            j+=1
+        if j-i >= 2:
+            out.append(f"{nums[i]}-{nums[j]}")
+        else:
+            out.extend(str(num) for num in nums[i:j+1])
+        i=j+1
+    return ", ".join(out)
+
+
+# ====================================================================================
+# Work out, for each fanzine series, whether its whole numbers run in order and which of them are missing.
+# Returns two lists of (an issue of the series, the text of its report row): the first for the report of
+# issues needed to complete a series, the second for the report of series whose numbering cannot be read.
+# The numbers come from each page's own Whole column (see FanacOrgReaders.SeriesNumbering) rather than from
+# the issues' FanzineSerials, which may have had their whole numbers inferred from the issues' titles.
+def AnalyzeSeriesNumbering(fanacIssueList: list[FanzineIssueInfo]) -> tuple[list[tuple[FanzineIssueInfo, str]], list[tuple[FanzineIssueInfo, str]]]:
+
+    if len(FanacOrgReaders.gSeriesNumbering) == 0:
+        LogError("AnalyzeSeriesNumbering: no page numbering was recorded, so both whole-number reports will be empty."
+                 "  This is what happens on a run which uses the saved fanzine list instead of reading the pages.")
+        return [], []
+
+    # One representative issue per series: the reports need a FanzineIssueInfo to hang the series' name and
+    # URL on, and everything else comes out of the SeriesNumbering.
+    representative: dict[str, FanzineIssueInfo]={}
+    for fz in fanacIssueList:
+        representative.setdefault(fz.Series.DirURL, fz)
+
+    needed: list[tuple[FanzineIssueInfo, str]]=[]
+    annoying: list[tuple[FanzineIssueInfo, str]]=[]
+
+    for dirURL, fz in representative.items():
+        # A Collection (or a page keyworded "Alphabetize individually") is a grab-bag of unrelated issues
+        # rather than a numbered run, so neither report has anything to say about it.
+        if fz.Series.AlphabetizeIndividually:
+            continue
+        numbering=FanacOrgReaders.gSeriesNumbering.get(dirURL)
+        if numbering is None or len(numbering.Rows) < gMinIssuesToTestNumbering:
+            continue
+
+        if not numbering.HasWholeColumn:
+            # A series of individually-titled issues was never numbered.  That is not annoying, it is just not
+            # numbered, so say so only when the page looks like it is numbering its issues some other way.
+            numberedTitles=len([1 for name, _ in numbering.Rows if re.search(r"[0-9]$", name.strip()) is not None])
+            if numbering.HasNumberColumn or 2*numberedTitles >= len(numbering.Rows):
+                annoying.append((fz, "No Whole column"))
+            continue
+
+        # A blank Whole cell is fine -- an issue between two numbered ones may simply not have carried a whole
+        # number -- but a column in which every cell is blank tells us nothing.
+        wholes=[whole for _, whole in numbering.Rows if whole != ""]
+        if len(wholes) == 0:
+            annoying.append((fz, "The Whole column is empty"))
+            continue
+
+        # Each fault below makes the numbering unreadable, so a series with any of them gets no gap analysis.
+        # All of them are reported rather than just the first: one page can have several, and whoever fixes
+        # the page wants to see them all.
+        faults: list[str]=[]
+
+        unreadable=[whole for whole in wholes if re.match(r"^[0-9]+$", whole) is None]
+        if len(unreadable) > 0:
+            faults.append(f"not a whole number: {', '.join(unreadable)}")
+
+        nums=[int(whole) for whole in wholes if re.match(r"^[0-9]+$", whole) is not None]
+
+        repeats=sorted([num for num, count in Counter(nums).items() if count > 1])
+        if len(repeats) > 0:
+            faults.append(f"used more than once: {', '.join(str(num) for num in repeats)}")
+
+        # Reading down the page, a whole number smaller than one above it is an inversion.  Skipped numbers are fine.
+        inversions=[f"{prev} then {num}" for prev, num in zip(nums, nums[1:]) if num < prev]
+        if len(inversions) > 0:
+            faults.append(f"out of order: {'; '.join(inversions)}")
+
+        if len(faults) > 0:
+            annoying.append((fz, "; ".join(faults)))
+            continue
+
+        # Only the gaps inside the run count.  We have no way of knowing how far the series ran at either end.
+        present=set(nums)
+        missing=[num for num in range(min(nums), max(nums)+1) if num not in present]
+        if len(missing) > 0:
+            needed.append((fz, CompressRuns(missing)))
+
+    return needed, annoying
 
 
 def SortFanacIssueListByTitle(fanacIssueListByTitle):
