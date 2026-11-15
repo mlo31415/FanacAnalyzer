@@ -651,7 +651,9 @@ def main():
         seriesList=sorted([fz for fz, _ in neededNumbering], key=SeriesSortKey)
         WriteHTMLTable(os.path.join(reportFilePath, report),
                        seriesList,
-                       fBodyURL=lambda fz: fz.Series.DirURL,
+                       # The link belongs on the fanzine's name in the heading, not on the list of numbers:
+                       # an empty URL gets FormatLink to leave the row's text as plain text.
+                       fBodyURL=lambda fz: "",
                        fButtonText=SeriesButtonText,
                        #
                        fGroupURL=lambda fz: fz.Series.DirURL,
@@ -672,7 +674,8 @@ def main():
         seriesList=sorted([fz for fz, _ in annoyingNumbering], key=SeriesSortKey)
         WriteHTMLTable(os.path.join(reportFilePath, report),
                        seriesList,
-                       fBodyURL=lambda fz: fz.Series.DirURL,
+                       # As above: the heading carries the link, the description of the problem does not.
+                       fBodyURL=lambda fz: "",
                        fButtonText=SeriesButtonText,
                        #
                        fGroupURL=lambda fz: fz.Series.DirURL,
