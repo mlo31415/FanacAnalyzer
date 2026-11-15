@@ -665,7 +665,7 @@ def main():
                        inAlphaOrder=True)
         Log(f"Complete: {report}", timestamp=True)
 
-    report="Fanzines Series with Annoying numbering.html"
+    report="Fanzines Series with Annoying Numbering.html"
     if len(reportsToRun) == 0 or report in reportsToRun:
         Log(f"Begin Report: '{report}'", timestamp=True)
         rowText={fz.Series.DirURL: text for fz, text in annoyingNumbering}
@@ -790,6 +790,22 @@ def CompressRuns(nums: list[int]) -> str:
 
 
 # ====================================================================================
+# What whole numbers a Whole cell stands for.  A plain number is itself, and a combined issue written "7-8"
+# is both of them, so that neither is asked for as missing.  Anything else -- a half-number like 12.5, a 4a
+# -- stands for none of them: it is a real issue of the series, so it cannot be called missing, but neither
+# does it fill a gap in the numbering.
+def WholeNumbersIn(whole: str) -> list[int]:
+    if re.match(r"^[0-9]+$", whole) is not None:
+        return [int(whole)]
+    m=re.match(r"^([0-9]+) *- *([0-9]+)$", whole)
+    if m is not None:
+        first, last=int(m.groups()[0]), int(m.groups()[1])
+        if first <= last:
+            return list(range(first, last+1))
+    return []
+
+
+# ====================================================================================
 # Work out, for each fanzine series, whether its whole numbers run in order and which of them are missing.
 # Returns two lists of (an issue of the series, the text of its report row): the first for the report of
 # issues needed to complete a series, the second for the report of series whose numbering cannot be read.
@@ -835,16 +851,19 @@ def AnalyzeSeriesNumbering(fanacIssueList: list[FanzineIssueInfo]) -> tuple[list
             annoying.append((fz, "The Whole column is empty"))
             continue
 
-        # Each fault below makes the numbering unreadable, so a series with any of them gets no gap analysis.
-        # All of them are reported rather than just the first: one page can have several, and whoever fixes
-        # the page wants to see them all.
+        # A cell we cannot read as a whole number is passed over rather than held against the series.  Only a
+        # column with nothing readable in it at all stops us.  (See WholeNumbersIn.)
+        covered=[WholeNumbersIn(whole) for whole in wholes]
+        nums=[cell[0] for cell in covered if len(cell) > 0]     # Where each readable cell starts, in page order
+        present={num for cell in covered for num in cell}       # Every number the page accounts for
+        if len(nums) == 0:
+            annoying.append((fz, f"No whole numbers in the Whole column, only: {', '.join(wholes)}"))
+            continue
+
+        # Each fault below makes the numbering unreadable, so a series with either of them gets no gap
+        # analysis.  Both are reported rather than just the first: a page can have both, and whoever fixes
+        # the page wants to see them together.
         faults: list[str]=[]
-
-        unreadable=[whole for whole in wholes if re.match(r"^[0-9]+$", whole) is None]
-        if len(unreadable) > 0:
-            faults.append(f"not a whole number: {', '.join(unreadable)}")
-
-        nums=[int(whole) for whole in wholes if re.match(r"^[0-9]+$", whole) is not None]
 
         repeats=sorted([num for num, count in Counter(nums).items() if count > 1])
         if len(repeats) > 0:
@@ -860,8 +879,7 @@ def AnalyzeSeriesNumbering(fanacIssueList: list[FanzineIssueInfo]) -> tuple[list
             continue
 
         # Only the gaps inside the run count.  We have no way of knowing how far the series ran at either end.
-        present=set(nums)
-        missing=[num for num in range(min(nums), max(nums)+1) if num not in present]
+        missing=[num for num in range(min(present), max(present)+1) if num not in present]
         if len(missing) > 0:
             needed.append((fz, CompressRuns(missing)))
 
