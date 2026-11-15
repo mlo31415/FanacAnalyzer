@@ -776,20 +776,19 @@ def SeriesButtonText(fz: FanzineIssueInfo) -> str:
 
 
 # ====================================================================================
-# Render a list of numbers the way a reader can take it in at a glance: a run of three or more becomes "12-27".
-def CompressRuns(nums: list[int]) -> str:
-    out: list[str]=[]
+# Break an ascending list of numbers into the runs a reader can take in at a glance: [4, 5, 8, 9, 10, 13]
+# becomes ["4-5", "8-10", "13"].  Returned in pieces rather than as one string so that a caller which has to
+# label each of them -- the volume reports write "V2.3-5" -- can do so.
+def CompressRuns(nums: list[int]) -> list[str]:
+    runs: list[str]=[]
     i=0
     while i < len(nums):
         j=i
         while j+1 < len(nums) and nums[j+1] == nums[j]+1:
             j+=1
-        if j-i >= 2:
-            out.append(f"{nums[i]}-{nums[j]}")
-        else:
-            out.extend(str(num) for num in nums[i:j+1])
+        runs.append(str(nums[i]) if j == i else f"{nums[i]}-{nums[j]}")
         i=j+1
-    return ", ".join(out)
+    return runs
 
 
 # ====================================================================================
@@ -845,7 +844,8 @@ def MissingVolNums(numbering: FanacOrgReaders.SeriesNumbering) -> list[str]|None
     # tells us, and the volumes of one fanzine are not all the same length.
     missing: list[str]=[]
     for vol in vols:
-        missing.extend(f"V{vol}.{num}" for num in range(1, max(byVol[vol])+1) if num not in byVol[vol])
+        gaps=[num for num in range(1, max(byVol[vol])+1) if num not in byVol[vol]]
+        missing.extend(f"V{vol}.{run}" for run in CompressRuns(gaps))
     return missing
 
 
@@ -937,7 +937,7 @@ def AnalyzeSeriesNumbering(fanacIssueList: list[FanzineIssueInfo]) -> tuple[list
         # Only the gaps inside the run count.  We have no way of knowing how far the series ran at either end.
         missing=[num for num in range(min(present), max(present)+1) if num not in present]
         if len(missing) > 0:
-            needed.append((fz, CompressRuns(missing)))
+            needed.append((fz, ", ".join(CompressRuns(missing))))
 
     return needed, annoying
 
