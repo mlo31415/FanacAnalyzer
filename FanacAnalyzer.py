@@ -809,6 +809,47 @@ def WholeNumbersIn(whole: str) -> list[int]:
 
 
 # ====================================================================================
+# A series with no whole numbers to go on may still be numbered by volume and issue number, the issue number
+# starting again at 1 each time the volume increments.  Returns the issues missing from the start or from the
+# middle of a volume, written V<vol>.<num>, or None if the page turns out not to be numbered that way.
+def MissingVolNums(numbering: FanacOrgReaders.SeriesNumbering) -> list[str]|None:
+
+    # A combined issue in the Number column ("3-4") is read as it is in the Whole column.  A blank Volume
+    # cell is taken to mean the volume of the row above it, which is how these tables are written: Australian
+    # SF News leaves it blank on its issue 2, between two rows which say volume 1, and counting that row as
+    # having no volume at all had the report asking for an issue listed two rows further up.  Something in
+    # the cell we cannot read is a different matter and ends the carry-over.
+    byVol: dict[int, set[int]]={}
+    vol=None
+    for row in numbering.Rows:
+        cell=WholeNumbersIn(row.Volume)
+        if len(cell) == 1:
+            vol=cell[0]
+        elif row.Volume != "":
+            vol=None
+        issues=WholeNumbersIn(row.Number)
+        if vol is None or len(issues) == 0:
+            continue
+        byVol.setdefault(vol, set()).update(issues)
+    if sum(len(issues) for issues in byVol.values()) < gMinIssuesToTestNumbering:
+        return None
+
+    # Taking the first issue of a volume to be number 1 is only safe where the page really does start each
+    # volume again at 1.  Some number their issues straight through instead -- Fantasy Review runs V1#1-6,
+    # V2#7-12, V3#13-16 -- and assuming a restart there would ask for a dozen issues which never existed.
+    vols=sorted(byVol)
+    if len(vols) > 1 and not any(1 in byVol[vol] for vol in vols[1:]):
+        return None
+
+    # Only the gaps at the start of a volume and inside it.  Where a volume ended is not something the page
+    # tells us, and the volumes of one fanzine are not all the same length.
+    missing: list[str]=[]
+    for vol in vols:
+        missing.extend(f"V{vol}.{num}" for num in range(1, max(byVol[vol])+1) if num not in byVol[vol])
+    return missing
+
+
+# ====================================================================================
 # Work out, for each fanzine series, whether its whole numbers run in order and which of them are missing.
 # Returns two lists of (an issue of the series, the text of its report row): the first for the report of
 # issues needed to complete a series, the second for the report of series whose numbering cannot be read.
@@ -839,28 +880,40 @@ def AnalyzeSeriesNumbering(fanacIssueList: list[FanzineIssueInfo]) -> tuple[list
         if numbering is None or len(numbering.Rows) < gMinIssuesToTestNumbering:
             continue
 
+        # There are three ways a series can leave us with no whole numbers to work with.  None of them is the
+        # end of it: the series may be numbered by volume and issue number instead, which is tried below.
+        noWholes=""                 # Why the whole numbers are no use.  Empty means they are usable.
+        nums: list[int]=[]          # Where each readable Whole cell starts, in page order
+        present: set[int]=set()     # Every whole number the page accounts for
         if not numbering.HasWholeColumn:
-            # A series of individually-titled issues was never numbered.  That is not annoying, it is just not
-            # numbered, so say so only when the page looks like it is numbering its issues some other way.
-            numberedTitles=len([1 for name, _ in numbering.Rows if re.search(r"[0-9]$", name.strip()) is not None])
-            if numbering.HasNumberColumn or 2*numberedTitles >= len(numbering.Rows):
-                annoying.append((fz, "No Whole column"))
-            continue
+            noWholes="No Whole column"
+        else:
+            # A blank Whole cell is fine -- an issue between two numbered ones may simply not have carried a
+            # whole number -- but a column in which every cell is blank tells us nothing.
+            wholes=[row.Whole for row in numbering.Rows if row.Whole != ""]
+            if len(wholes) == 0:
+                noWholes="The Whole column is empty"
+            else:
+                # A cell we cannot read as a whole number is passed over rather than held against the series.
+                # Only a column with nothing readable in it at all stops us.  (See WholeNumbersIn.)
+                covered=[WholeNumbersIn(whole) for whole in wholes]
+                nums=[cell[0] for cell in covered if len(cell) > 0]
+                present={num for cell in covered for num in cell}
+                if len(nums) == 0:
+                    noWholes=f"No whole numbers in the Whole column, only: {', '.join(wholes)}"
 
-        # A blank Whole cell is fine -- an issue between two numbered ones may simply not have carried a whole
-        # number -- but a column in which every cell is blank tells us nothing.
-        wholes=[whole for _, whole in numbering.Rows if whole != ""]
-        if len(wholes) == 0:
-            annoying.append((fz, "The Whole column is empty"))
-            continue
-
-        # A cell we cannot read as a whole number is passed over rather than held against the series.  Only a
-        # column with nothing readable in it at all stops us.  (See WholeNumbersIn.)
-        covered=[WholeNumbersIn(whole) for whole in wholes]
-        nums=[cell[0] for cell in covered if len(cell) > 0]     # Where each readable cell starts, in page order
-        present={num for cell in covered for num in cell}       # Every number the page accounts for
-        if len(nums) == 0:
-            annoying.append((fz, f"No whole numbers in the Whole column, only: {', '.join(wholes)}"))
+        if noWholes != "":
+            missingVolNums=MissingVolNums(numbering)
+            if missingVolNums is not None:
+                if len(missingVolNums) > 0:
+                    needed.append((fz, ", ".join(missingVolNums)))
+                continue
+            # Not numbered by volume and issue either, so there is nothing we can say about this series.  A
+            # series of individually-titled issues was never numbered at all, which is not annoying, it is
+            # just not numbered: say so only when the page looks like it is numbering its issues somehow.
+            numberedTitles=len([1 for row in numbering.Rows if re.search(r"[0-9]$", row.IssueName.strip()) is not None])
+            if noWholes != "No Whole column" or numbering.HasNumberColumn or 2*numberedTitles >= len(numbering.Rows):
+                annoying.append((fz, noWholes))
             continue
 
         # Each fault below makes the numbering unreadable, so a series with either of them gets no gap

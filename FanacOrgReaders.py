@@ -437,12 +437,26 @@ def ReadFanacFanzineIndexPageOld(fanzineName: str, directoryUrl: str, html: str)
 # this in as it reads each page and FanacAnalyzer reads it back when it generates the reports.
 # Note that this is built during the read, so it is empty on a run using the saved fanzine list.
 @dataclass
+class NumberingRow:
+    IssueName: str=""
+    Whole: str=""       # The row's three numbering cells, each exactly as the page writes it
+    Volume: str=""
+    Number: str=""
+
+@dataclass
 class SeriesNumbering:
     HasWholeColumn: bool=False      # Is one of the page's columns the one FA reads as the whole number?
     HasNumberColumn: bool=False     # ...or as the issue number?  (Tells a never-numbered series from a sloppily-numbered one.)
-    Rows: list[tuple[str, str]]=field(default_factory=list)     # (issue name, the row's Whole cell exactly as written), in page order
+    HasVolumeColumn: bool=False     # ...or as the volume?
+    Rows: list[NumberingRow]=field(default_factory=list)        # In page order
 
 gSeriesNumbering: dict[str, SeriesNumbering]={}     # Keyed by the series' directory URL
+
+
+# One of a row's cells as the page wrote it.  (GetCellValueByColHeader's Text is None for a missing cell.)
+def CellText(columnHeaders: list[str], row: list[TextAndHref], name: str) -> str:
+    text=GetCellValueByColHeader(columnHeaders, row, name).Text
+    return text.strip() if text is not None else ""
 
 
 #=========================================================================================
@@ -485,7 +499,8 @@ def ExtractFanzineIndexTableInfo(directoryUrl: str, html: str, editor: str, defa
     # Remember the page's numbering columns for the two numbering reports.  (See SeriesNumbering, above.)
     # columnHeaders has already been canonicized, so these are the same names GetCellValueByColHeader() matches.
     numbering=SeriesNumbering(HasWholeColumn="Whole" in columnHeaders,
-                              HasNumberColumn=any(x in columnHeaders for x in ("Number", "VolNum", "Vol+Num")))
+                              HasNumberColumn=any(x in columnHeaders for x in ("Number", "VolNum", "Vol+Num")),
+                              HasVolumeColumn=any(x in columnHeaders for x in ("Volume", "VolNum", "Vol+Num")))
     gSeriesNumbering[directoryUrl]=numbering
 
     # The mailing column may contain hyperlinks.  Suppress them, leaving only the link text.
@@ -531,8 +546,10 @@ def ExtractFanzineIndexTableInfo(directoryUrl: str, html: str, editor: str, defa
         if fi is None:
             continue
 
-        wholeText=GetCellValueByColHeader(columnHeaders, tableRow, "Whole").Text
-        numbering.Rows.append((fi.IssueName, wholeText.strip() if wholeText is not None else ""))
+        numbering.Rows.append(NumberingRow(fi.IssueName,
+                                           CellText(columnHeaders, tableRow, "Whole"),
+                                           CellText(columnHeaders, tableRow, "Volume"),
+                                           CellText(columnHeaders, tableRow, "Number")))
 
         # Append it and log it.
         Log(f"   {fi=}")
