@@ -934,8 +934,10 @@ def AnalyzeSeriesNumbering(fanacIssueList: list[FanzineIssueInfo]) -> tuple[list
             annoying.append((fz, "; ".join(faults)))
             continue
 
-        # Only the gaps inside the run count.  We have no way of knowing how far the series ran at either end.
-        missing=[num for num in range(min(present), max(present)+1) if num not in present]
+        # A series is taken to have started at 1, so the numbers missing ahead of the first one we hold count
+        # just as the ones inside the run do -- Phoenix holds 4, 5, 7, 8, 9 and wants 1-3 as well as 6.  Where
+        # it ended is a different matter, which the page does not tell us: nothing past the highest is counted.
+        missing=[num for num in range(1, max(present)+1) if num not in present]
         if len(missing) > 0:
             needed.append((fz, ", ".join(CompressRuns(missing))))
 
