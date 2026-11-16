@@ -813,13 +813,16 @@ def WholeNumbersIn(whole: str) -> list[int]:
 
 # ====================================================================================
 # The whole numbers a page's rows account for, and whatever is wrong with the way they run.  Returns the
-# number each readable Whole cell starts at in page order, every number the rows account for, and the faults
+# number each readable Whole cell starts at in page order, every number we hold an issue for, and the faults
 # -- each of which makes the numbering unreadable, so a series with any of them gets no gap analysis.  Both
 # are reported rather than just the first: a page can have both, and whoever fixes it wants to see them together.
 def ReadWholeNumbers(rows: list[FanacOrgReaders.NumberingRow]) -> tuple[list[int], set[int], list[str]]:
-    covered=[WholeNumbersIn(row.Whole) for row in rows if row.Whole != ""]
-    nums=[cell[0] for cell in covered if len(cell) > 0]
-    present={num for cell in covered for num in cell}
+    covered=[(row, WholeNumbersIn(row.Whole)) for row in rows if row.Whole != ""]
+    nums=[cell[0] for _, cell in covered if len(cell) > 0]
+    # A row with no file behind it is an issue the page lists but the site does not hold -- Viper's page
+    # lists its 8 -- so its number counts towards the order the numbering runs in, but not towards the
+    # issues we have: the point of the report is to say which issues we still want.
+    present={num for row, cell in covered if row.Held for num in cell}
 
     faults: list[str]=[]
     repeats=sorted([num for num, count in Counter(nums).items() if count > 1])
@@ -832,6 +835,13 @@ def ReadWholeNumbers(rows: list[FanacOrgReaders.NumberingRow]) -> tuple[list[int
         faults.append(f"out of order: {'; '.join(inversions)}")
 
     return nums, present, faults
+
+
+# ====================================================================================
+# The highest whole number a page's rows reach, whether or not we hold the issue: a row the page lists with
+# nothing to read still tells us the series ran that far, so the gaps below it are gaps we want filling.
+def HighestNumbered(rows: list[FanacOrgReaders.NumberingRow]) -> int:
+    return max([num for row in rows for num in WholeNumbersIn(row.Whole)], default=0)
 
 
 # ====================================================================================
@@ -891,7 +901,7 @@ def RowsNumberedByIssueNumber(rows: list[FanacOrgReaders.NumberingRow]) -> list[
             m=re.search(r"(?:^|[ #])([0-9]+)$", row.IssueName.strip())
             if m is not None and int(m.groups()[0]) <= highest:
                 whole=m.groups()[0]
-        numbered.append(FanacOrgReaders.NumberingRow(IssueName=row.IssueName, Whole=whole))
+        numbered.append(FanacOrgReaders.NumberingRow(IssueName=row.IssueName, Whole=whole, Held=row.Held))
     return numbered
 
 
@@ -907,7 +917,8 @@ def MissingVolNums(numbering: FanacOrgReaders.SeriesNumbering) -> tuple[list[str
     # SF News leaves it blank on its issue 2, between two rows which say volume 1, and counting that row as
     # having no volume at all had the report asking for an issue listed two rows further up.  Something in
     # the cell we cannot read is a different matter and ends the carry-over.
-    byVol: dict[int, set[int]]={}
+    byVol: dict[int, set[int]]={}       # Which issues of each volume we hold
+    listed: dict[int, set[int]]={}      # Which ones its rows reach, whether we hold them or not
     vol=None
     for row in numbering.Rows:
         cell=WholeNumbersIn(row.Volume)
@@ -918,7 +929,9 @@ def MissingVolNums(numbering: FanacOrgReaders.SeriesNumbering) -> tuple[list[str
         issues=WholeNumbersIn(row.Number)
         if vol is None or len(issues) == 0:
             continue
-        byVol.setdefault(vol, set()).update(issues)
+        listed.setdefault(vol, set()).update(issues)
+        if row.Held:        # A row with no file behind it is an issue we lack (see ReadWholeNumbers)
+            byVol.setdefault(vol, set()).update(issues)
     held=sum(len(issues) for issues in byVol.values())
     if held < gMinIssuesToTestNumbering:
         return None
@@ -926,15 +939,15 @@ def MissingVolNums(numbering: FanacOrgReaders.SeriesNumbering) -> tuple[list[str
     # Taking the first issue of a volume to be number 1 is only safe where the page really does start each
     # volume again at 1.  Some number their issues straight through instead -- Fantasy Review runs V1#1-6,
     # V2#7-12, V3#13-16 -- and assuming a restart there would ask for a dozen issues which never existed.
-    vols=sorted(byVol)
-    if len(vols) > 1 and not any(1 in byVol[vol] for vol in vols[1:]):
+    vols=sorted(listed)
+    if len(vols) > 1 and not any(1 in listed[vol] for vol in vols[1:]):
         return None
 
     # Only the gaps at the start of a volume and inside it.  Where a volume ended is not something the page
     # tells us, and the volumes of one fanzine are not all the same length.
     missing: list[str]=[]
     for vol in vols:
-        gaps=[num for num in range(1, max(byVol[vol])+1) if num not in byVol[vol]]
+        gaps=[num for num in range(1, max(listed[vol])+1) if num not in byVol.get(vol, set())]
         missing.extend(f"V{vol}.{run}" for run in CompressRuns(gaps))
     return missing, held
 
@@ -1033,7 +1046,7 @@ def AnalyzeSeriesNumbering(fanacIssueList: list[FanzineIssueInfo]) -> tuple[list
                 if len(namedFaults) == 0 and len(namedNums) >= gMinIssuesToTestNumbering:
                     Log(f"AnalyzeSeriesNumbering: {fz.Series.SeriesName}: setting aside the {len(numbered)-len(named)}"
                         f" numbered issue(s) not named for the series leaves numbering which runs in order ({faults})")
-                    nums, present, faults=namedNums, namedPresent, namedFaults
+                    rows, nums, present, faults=named, namedNums, namedPresent, namedFaults
 
         if len(faults) > 0:
             annoying.append((fz, "; ".join(faults)))
@@ -1042,7 +1055,12 @@ def AnalyzeSeriesNumbering(fanacIssueList: list[FanzineIssueInfo]) -> tuple[list
         # A series is taken to have started at 1, so the numbers missing ahead of the first one we hold count
         # just as the ones inside the run do -- Phoenix holds 4, 5, 7, 8, 9 and wants 1-3 as well as 6.  Where
         # it ended is a different matter, which the page does not tell us: nothing past the highest is counted.
-        missing=[num for num in range(1, max(present)+1) if num not in present]
+        # Every numbered row on the page can be one with no file behind it, in which case we hold none of
+        # the issues it numbers and cannot say where the gaps in the run are.
+        if len(present) == 0:
+            continue
+
+        missing=[num for num in range(1, HighestNumbered(rows)+1) if num not in present]
         if len(missing) > 0:
             needed.append((fz, ", ".join(CompressRuns(missing)), len(present)))
 

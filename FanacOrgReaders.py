@@ -442,6 +442,7 @@ class NumberingRow:
     Whole: str=""       # The row's three numbering cells, each exactly as the page writes it
     Volume: str=""
     Number: str=""
+    Held: bool=True     # Is there a file behind the row, or does the page only list the issue?
 
 @dataclass
 class SeriesNumbering:
@@ -546,10 +547,13 @@ def ExtractFanzineIndexTableInfo(directoryUrl: str, html: str, editor: str, defa
         if fi is None:
             continue
 
+        # A row with nothing to link to is an issue the page knows of but the site has no scan of: Viper's
+        # page lists its 8 without one.  The numbering reports count it as an issue we lack.
         numbering.Rows.append(NumberingRow(fi.IssueName,
                                            CellText(columnHeaders, tableRow, "Whole"),
                                            CellText(columnHeaders, tableRow, "Volume"),
-                                           CellText(columnHeaders, tableRow, "Number")))
+                                           CellText(columnHeaders, tableRow, "Number"),
+                                           fi.PageFilename != ""))
 
         # Append it and log it.
         Log(f"   {fi=}")
