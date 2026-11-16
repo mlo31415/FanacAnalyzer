@@ -808,6 +808,68 @@ def WholeNumbersIn(whole: str) -> list[int]:
 
 
 # ====================================================================================
+# The whole numbers a page's rows account for, and whatever is wrong with the way they run.  Returns the
+# number each readable Whole cell starts at in page order, every number the rows account for, and the faults
+# -- each of which makes the numbering unreadable, so a series with any of them gets no gap analysis.  Both
+# are reported rather than just the first: a page can have both, and whoever fixes it wants to see them together.
+def ReadWholeNumbers(rows: list[FanacOrgReaders.NumberingRow]) -> tuple[list[int], set[int], list[str]]:
+    covered=[WholeNumbersIn(row.Whole) for row in rows if row.Whole != ""]
+    nums=[cell[0] for cell in covered if len(cell) > 0]
+    present={num for cell in covered for num in cell}
+
+    faults: list[str]=[]
+    repeats=sorted([num for num, count in Counter(nums).items() if count > 1])
+    if len(repeats) > 0:
+        faults.append(f"used more than once: {', '.join(str(num) for num in repeats)}")
+
+    # Reading down the page, a whole number smaller than one above it is an inversion.  Skipped numbers are fine.
+    inversions=[f"{prev} then {num}" for prev, num in zip(nums, nums[1:]) if num < prev]
+    if len(inversions) > 0:
+        faults.append(f"out of order: {'; '.join(inversions)}")
+
+    return nums, present, faults
+
+
+# ====================================================================================
+# The part of an issue's name which is the fanzine's name rather than which issue it is: "Obsessions 12",
+# "Obsessions #13" and "Obsessions February 1980" all come back "obsessions", and "Subsessions 1" does not.
+# Spaces and punctuation come off too, so that the "JoHn:re" of one row and the "JoHn Re" of the next are
+# recognized as the same fanzine.  A fanzine with a number in its name -- File 770 -- loses part of the name
+# as well, which does not matter: all we do with these is compare them with each other, and a page's rows
+# and its series name all lose the same part.
+def IssueBaseName(name: str) -> str:
+    # The designation begins at the first number, with or without the #, No. or Vol. which introduces it...
+    m=re.search(r"[ ,]+((#|no|nos|num|v|vol|whole)\.? *)?[0-9]", name.strip(), re.IGNORECASE)
+    if m is not None:
+        name=name[:m.start()]
+    # ...or, for an issue which is dated rather than numbered, at the month or the season.
+    m=re.search(r"[ ,]+(january|february|march|april|may|june|july|august|september|october|november|december"
+                r"|jan|feb|mar|apr|jun|jul|aug|sept|sep|oct|nov|dec|spring|summer|autumn|fall|winter)\.?(?![a-z])",
+                name, re.IGNORECASE)
+    if m is not None:
+        name=name[:m.start()]
+    return FlattenTextForSorting(name, RemoveLeadingArticles=True).replace(" ", "")
+
+
+# ====================================================================================
+# Some pages carry more than the fanzine they are about: Obsessions has a single issue of Subsessions in the
+# middle of it, Mimosa a string of supplements, Quandry a pair of bound volumes.  Those issues are numbered
+# in their own right, and their numbers land in the page's Whole column, where they read as faults in the
+# numbering of the fanzine the page is about.  Returns the rows which are named for the series itself, or
+# None if there is nothing to set aside (they all are) or if they are too few to be what the page is mostly
+# about, which is the case on a page carrying two fanzines of comparable size -- Phanny and Phanteur share
+# one -- where there is no saying which of them the numbering ought to be read as.
+def RowsNamedForTheSeries(seriesName: str, rows: list[FanacOrgReaders.NumberingRow]) -> list[FanacOrgReaders.NumberingRow]|None:
+    name=IssueBaseName(seriesName)
+    if name == "":
+        return None
+    named=[row for row in rows if IssueBaseName(row.IssueName) == name]
+    if len(named) == len(rows) or 2*len(named) <= len(rows):
+        return None
+    return named
+
+
+# ====================================================================================
 # A series with no whole numbers to go on may still be numbered by volume and issue number, the issue number
 # starting again at 1 each time the volume increments.  Returns the issues missing from the start or from the
 # middle of a volume, written V<vol>.<num>, or None if the page turns out not to be numbered that way.
@@ -885,6 +947,7 @@ def AnalyzeSeriesNumbering(fanacIssueList: list[FanzineIssueInfo]) -> tuple[list
         noWholes=""                 # Why the whole numbers are no use.  Empty means they are usable.
         nums: list[int]=[]          # Where each readable Whole cell starts, in page order
         present: set[int]=set()     # Every whole number the page accounts for
+        faults: list[str]=[]        # What is wrong with the way they run
         if not numbering.HasWholeColumn:
             noWholes="No Whole column"
         else:
@@ -896,9 +959,7 @@ def AnalyzeSeriesNumbering(fanacIssueList: list[FanzineIssueInfo]) -> tuple[list
             else:
                 # A cell we cannot read as a whole number is passed over rather than held against the series.
                 # Only a column with nothing readable in it at all stops us.  (See WholeNumbersIn.)
-                covered=[WholeNumbersIn(whole) for whole in wholes]
-                nums=[cell[0] for cell in covered if len(cell) > 0]
-                present={num for cell in covered for num in cell}
+                nums, present, faults=ReadWholeNumbers(numbering.Rows)
                 if len(nums) == 0:
                     noWholes=f"No whole numbers in the Whole column, only: {', '.join(wholes)}"
 
@@ -916,19 +977,21 @@ def AnalyzeSeriesNumbering(fanacIssueList: list[FanzineIssueInfo]) -> tuple[list
                 annoying.append((fz, noWholes))
             continue
 
-        # Each fault below makes the numbering unreadable, so a series with either of them gets no gap
-        # analysis.  Both are reported rather than just the first: a page can have both, and whoever fixes
-        # the page wants to see them together.
-        faults: list[str]=[]
-
-        repeats=sorted([num for num, count in Counter(nums).items() if count > 1])
-        if len(repeats) > 0:
-            faults.append(f"used more than once: {', '.join(str(num) for num in repeats)}")
-
-        # Reading down the page, a whole number smaller than one above it is an inversion.  Skipped numbers are fine.
-        inversions=[f"{prev} then {num}" for prev, num in zip(nums, nums[1:]) if num < prev]
-        if len(inversions) > 0:
-            faults.append(f"out of order: {'; '.join(inversions)}")
+        # A second fanzine riding along on the page numbers its own issues, and those numbers read as faults
+        # in the numbering of the fanzine the page is about.  Where setting aside the issues which are not
+        # named for the series leaves numbering which runs in order, that is what the page means, so the
+        # series is read without them: Obsessions, which carries one issue of Subsessions, is then a plain
+        # run with gaps in it.  Only the rows carrying a number are weighed, since they are the only ones
+        # which can be out of order.
+        if len(faults) > 0:
+            numbered=[row for row in numbering.Rows if len(WholeNumbersIn(row.Whole)) > 0]
+            named=RowsNamedForTheSeries(fz.Series.SeriesName, numbered)
+            if named is not None:
+                namedNums, namedPresent, namedFaults=ReadWholeNumbers(named)
+                if len(namedFaults) == 0 and len(namedNums) >= gMinIssuesToTestNumbering:
+                    Log(f"AnalyzeSeriesNumbering: {fz.Series.SeriesName}: setting aside the {len(numbered)-len(named)}"
+                        f" numbered issue(s) not named for the series leaves numbering which runs in order ({faults})")
+                    nums, present, faults=namedNums, namedPresent, namedFaults
 
         if len(faults) > 0:
             annoying.append((fz, "; ".join(faults)))
