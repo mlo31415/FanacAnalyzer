@@ -647,8 +647,9 @@ def main():
     if len(reportsToRun) == 0 or report in reportsToRun:
         Log(f"Begin Report: '{report}'", timestamp=True)
         # The row text is looked up by the series' URL because WriteHTMLTable's lambdas are handed only the issue.
-        rowText={fz.Series.DirURL: text for fz, text in neededNumbering}
-        seriesList=sorted([fz for fz, _ in neededNumbering], key=SeriesSortKey)
+        rowText={fz.Series.DirURL: text for fz, text, _ in neededNumbering}
+        rowHeld={fz.Series.DirURL: held for fz, _, held in neededNumbering}
+        seriesList=sorted([fz for fz, _, _ in neededNumbering], key=SeriesSortKey)
         WriteHTMLTable(os.path.join(reportFilePath, report),
                        seriesList,
                        # The link belongs on the fanzine's name in the heading, not on the list of numbers:
@@ -661,6 +662,9 @@ def main():
                        includeRowHeaderCounts=False,
                        #
                        fRowText=lambda fz: "missing "+rowText[fz.Series.DirURL],
+                       # How many issues the series' numbering does account for, annotated the way the other
+                       # reports annotate a row: a parenthesis in small type after the row's own text.
+                       fRowAnnot=lambda fz: f"have:&nbsp;{rowHeld[fz.Series.DirURL]}",
                        #
                        topCountText=f"{len(seriesList):,} fanzine series with gaps in the whole numbers.\n"+timestamp+"\n",
                        reportFilename="control-Header (Needed to complete a series).html",
@@ -872,8 +876,9 @@ def RowsNamedForTheSeries(seriesName: str, rows: list[FanacOrgReaders.NumberingR
 # ====================================================================================
 # A series with no whole numbers to go on may still be numbered by volume and issue number, the issue number
 # starting again at 1 each time the volume increments.  Returns the issues missing from the start or from the
-# middle of a volume, written V<vol>.<num>, or None if the page turns out not to be numbered that way.
-def MissingVolNums(numbering: FanacOrgReaders.SeriesNumbering) -> list[str]|None:
+# middle of a volume, written V<vol>.<num>, along with how many issues the page does account for, or None if
+# the page turns out not to be numbered that way.
+def MissingVolNums(numbering: FanacOrgReaders.SeriesNumbering) -> tuple[list[str], int]|None:
 
     # A combined issue in the Number column ("3-4") is read as it is in the Whole column.  A blank Volume
     # cell is taken to mean the volume of the row above it, which is how these tables are written: Australian
@@ -892,7 +897,8 @@ def MissingVolNums(numbering: FanacOrgReaders.SeriesNumbering) -> list[str]|None
         if vol is None or len(issues) == 0:
             continue
         byVol.setdefault(vol, set()).update(issues)
-    if sum(len(issues) for issues in byVol.values()) < gMinIssuesToTestNumbering:
+    held=sum(len(issues) for issues in byVol.values())
+    if held < gMinIssuesToTestNumbering:
         return None
 
     # Taking the first issue of a volume to be number 1 is only safe where the page really does start each
@@ -908,16 +914,17 @@ def MissingVolNums(numbering: FanacOrgReaders.SeriesNumbering) -> list[str]|None
     for vol in vols:
         gaps=[num for num in range(1, max(byVol[vol])+1) if num not in byVol[vol]]
         missing.extend(f"V{vol}.{run}" for run in CompressRuns(gaps))
-    return missing
+    return missing, held
 
 
 # ====================================================================================
 # Work out, for each fanzine series, whether its whole numbers run in order and which of them are missing.
-# Returns two lists of (an issue of the series, the text of its report row): the first for the report of
-# issues needed to complete a series, the second for the report of series whose numbering cannot be read.
+# Returns two lists: the series needed to complete, as (an issue of the series, the text of its report row,
+# how many issues its numbering accounts for), and the series whose numbering cannot be read, as (an issue
+# of the series, the text of its report row).
 # The numbers come from each page's own Whole column (see FanacOrgReaders.SeriesNumbering) rather than from
 # the issues' FanzineSerials, which may have had their whole numbers inferred from the issues' titles.
-def AnalyzeSeriesNumbering(fanacIssueList: list[FanzineIssueInfo]) -> tuple[list[tuple[FanzineIssueInfo, str]], list[tuple[FanzineIssueInfo, str]]]:
+def AnalyzeSeriesNumbering(fanacIssueList: list[FanzineIssueInfo]) -> tuple[list[tuple[FanzineIssueInfo, str, int]], list[tuple[FanzineIssueInfo, str]]]:
 
     if len(FanacOrgReaders.gSeriesNumbering) == 0:
         LogError("AnalyzeSeriesNumbering: no page numbering was recorded, so both whole-number reports will be empty."
@@ -930,7 +937,7 @@ def AnalyzeSeriesNumbering(fanacIssueList: list[FanzineIssueInfo]) -> tuple[list
     for fz in fanacIssueList:
         representative.setdefault(fz.Series.DirURL, fz)
 
-    needed: list[tuple[FanzineIssueInfo, str]]=[]
+    needed: list[tuple[FanzineIssueInfo, str, int]]=[]
     annoying: list[tuple[FanzineIssueInfo, str]]=[]
 
     for dirURL, fz in representative.items():
@@ -964,10 +971,11 @@ def AnalyzeSeriesNumbering(fanacIssueList: list[FanzineIssueInfo]) -> tuple[list
                     noWholes=f"No whole numbers in the Whole column, only: {', '.join(wholes)}"
 
         if noWholes != "":
-            missingVolNums=MissingVolNums(numbering)
-            if missingVolNums is not None:
+            volNums=MissingVolNums(numbering)
+            if volNums is not None:
+                missingVolNums, heldVolNums=volNums
                 if len(missingVolNums) > 0:
-                    needed.append((fz, ", ".join(missingVolNums)))
+                    needed.append((fz, ", ".join(missingVolNums), heldVolNums))
                 continue
             # Not numbered by volume and issue either, so there is nothing we can say about this series.  A
             # series of individually-titled issues was never numbered at all, which is not annoying, it is
@@ -1002,7 +1010,7 @@ def AnalyzeSeriesNumbering(fanacIssueList: list[FanzineIssueInfo]) -> tuple[list
         # it ended is a different matter, which the page does not tell us: nothing past the highest is counted.
         missing=[num for num in range(1, max(present)+1) if num not in present]
         if len(missing) > 0:
-            needed.append((fz, ", ".join(CompressRuns(missing))))
+            needed.append((fz, ", ".join(CompressRuns(missing)), len(present)))
 
     return needed, annoying
 
