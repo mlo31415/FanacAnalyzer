@@ -874,6 +874,28 @@ def RowsNamedForTheSeries(seriesName: str, rows: list[FanacOrgReaders.NumberingR
 
 
 # ====================================================================================
+# A page which numbers its issues straight through rather than within volumes puts those numbers in its
+# Number column, where they can be read exactly as a Whole column is read.  Returns the rows with each
+# one's Number cell standing as its Whole cell.  A row whose cell the page leaves blank, but whose issue
+# name ends in a number -- Sanders leaves it blank on its "Sanders 1" and the Planet on its "The Planet 1"
+# -- is read as the number in the name, since otherwise the report asks for an issue the page plainly
+# lists.  (A blank cell in a Whole column is a different matter: an issue may really have carried no whole
+# number.)  A name ending in a number larger than any the cells themselves give is passed over, that being
+# a year rather than an issue number.
+def RowsNumberedByIssueNumber(rows: list[FanacOrgReaders.NumberingRow]) -> list[FanacOrgReaders.NumberingRow]:
+    highest=max([num for row in rows for num in WholeNumbersIn(row.Number)], default=0)
+    numbered: list[FanacOrgReaders.NumberingRow]=[]
+    for row in rows:
+        whole=row.Number
+        if whole == "":
+            m=re.search(r"(?:^|[ #])([0-9]+)$", row.IssueName.strip())
+            if m is not None and int(m.groups()[0]) <= highest:
+                whole=m.groups()[0]
+        numbered.append(FanacOrgReaders.NumberingRow(IssueName=row.IssueName, Whole=whole))
+    return numbered
+
+
+# ====================================================================================
 # A series with no whole numbers to go on may still be numbered by volume and issue number, the issue number
 # starting again at 1 each time the volume increments.  Returns the issues missing from the start or from the
 # middle of a volume, written V<vol>.<num>, along with how many issues the page does account for, or None if
@@ -955,6 +977,7 @@ def AnalyzeSeriesNumbering(fanacIssueList: list[FanzineIssueInfo]) -> tuple[list
         nums: list[int]=[]          # Where each readable Whole cell starts, in page order
         present: set[int]=set()     # Every whole number the page accounts for
         faults: list[str]=[]        # What is wrong with the way they run
+        rows=numbering.Rows         # The rows the numbers are read from, Whole cell by Whole cell
         if not numbering.HasWholeColumn:
             noWholes="No Whole column"
         else:
@@ -966,7 +989,7 @@ def AnalyzeSeriesNumbering(fanacIssueList: list[FanzineIssueInfo]) -> tuple[list
             else:
                 # A cell we cannot read as a whole number is passed over rather than held against the series.
                 # Only a column with nothing readable in it at all stops us.  (See WholeNumbersIn.)
-                nums, present, faults=ReadWholeNumbers(numbering.Rows)
+                nums, present, faults=ReadWholeNumbers(rows)
                 if len(nums) == 0:
                     noWholes=f"No whole numbers in the Whole column, only: {', '.join(wholes)}"
 
@@ -977,13 +1000,24 @@ def AnalyzeSeriesNumbering(fanacIssueList: list[FanzineIssueInfo]) -> tuple[list
                 if len(missingVolNums) > 0:
                     needed.append((fz, ", ".join(missingVolNums), heldVolNums))
                 continue
-            # Not numbered by volume and issue either, so there is nothing we can say about this series.  A
-            # series of individually-titled issues was never numbered at all, which is not annoying, it is
-            # just not numbered: say so only when the page looks like it is numbering its issues somehow.
-            numberedTitles=len([1 for row in numbering.Rows if re.search(r"[0-9]$", row.IssueName.strip()) is not None])
-            if noWholes != "No Whole column" or numbering.HasNumberColumn or 2*numberedTitles >= len(numbering.Rows):
-                annoying.append((fz, noWholes))
-            continue
+
+            # A page which numbers its issues but has no volume for them to be numbered within is numbering
+            # them straight through, so its Number column is a whole-number column under another name: the
+            # Planet's 1, 3, 4, 5, 6 is a run with its 2 missing.  Read it exactly as a Whole column is read,
+            # faults and all.  (A page which does have volumes has already been through MissingVolNums.)
+            if numbering.HasNumberColumn and not any(len(WholeNumbersIn(row.Volume)) > 0 for row in numbering.Rows):
+                rows=RowsNumberedByIssueNumber(numbering.Rows)
+                nums, present, faults=ReadWholeNumbers(rows)
+
+            if len(nums) == 0:
+                # Numbered neither by volume and issue nor by issue alone, so there is nothing we can say
+                # about this series.  A series of individually-titled issues was never numbered at all,
+                # which is not annoying, it is just not numbered: say so only when the page looks like it
+                # is numbering its issues somehow.
+                numberedTitles=len([1 for row in numbering.Rows if re.search(r"[0-9]$", row.IssueName.strip()) is not None])
+                if noWholes != "No Whole column" or numbering.HasNumberColumn or 2*numberedTitles >= len(numbering.Rows):
+                    annoying.append((fz, noWholes))
+                continue
 
         # A second fanzine riding along on the page numbers its own issues, and those numbers read as faults
         # in the numbering of the fanzine the page is about.  Where setting aside the issues which are not
@@ -992,7 +1026,7 @@ def AnalyzeSeriesNumbering(fanacIssueList: list[FanzineIssueInfo]) -> tuple[list
         # run with gaps in it.  Only the rows carrying a number are weighed, since they are the only ones
         # which can be out of order.
         if len(faults) > 0:
-            numbered=[row for row in numbering.Rows if len(WholeNumbersIn(row.Whole)) > 0]
+            numbered=[row for row in rows if len(WholeNumbersIn(row.Whole)) > 0]
             named=RowsNamedForTheSeries(fz.Series.SeriesName, numbered)
             if named is not None:
                 namedNums, namedPresent, namedFaults=ReadWholeNumbers(named)
