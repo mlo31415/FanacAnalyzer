@@ -412,6 +412,7 @@ def main():
                       fanacIssueList,
                       fRowText=lambda fz: fz.IssueName,
                       fGroupText=lambda fz: fz.SeriesName,
+                      fRowHeaderSelect=lambda fz: fz.Series.DirURL+" "+fz.SeriesName+fz.SeriesEditor,   # See the HTML listing below
                       topCountText=topcounttext+"\n"+timestamp+"\n",
                       crossReferences=crossReferences)
         Log(f"Complete: {report}", timestamp=True)
@@ -425,7 +426,16 @@ def main():
                        fButtonText=lambda fz: AlphaButtonText(fz),
                        fGroupText=lambda fz: fz.SeriesName,
                        fGroupAnnot=lambda fz: f"<br><small>{fz.SeriesEditor}</small>",
-                       fRowHeaderSelect=lambda fz: fz.SeriesName+fz.SeriesEditor,
+                       # What makes a fanzine one fanzine is its directory rather than its name: fanac.org
+                       # holds two different fanzines called Warp, one the New Zealand clubzine and one
+                       # Montreal's, and both pages give the editor as "various", so a key of the name and the
+                       # editor ran the two of them together under a single heading.  The directory is added to
+                       # that key rather than replacing it, so that a block can only ever come apart, never run
+                       # together: a Collection page makes a series of each of its issues, and all of those
+                       # share the one directory.  A fanzine held in two directories -- a one-shot filed both
+                       # under its editor and in a decade's one-shots -- now gets a block for each, which is
+                       # where its issues really are.
+                       fRowHeaderSelect=lambda fz: fz.Series.DirURL+" "+fz.SeriesName+fz.SeriesEditor,
                        fRowText=lambda fz: fz.IssueName,
                        fRowAnnot=lambda fz: AnnotateDate(fz),
                        topCountText=topcounttext+"\n"+timestamp+"\n",
@@ -659,6 +669,7 @@ def main():
                        #
                        fGroupURL=lambda fz: fz.Series.DirURL,
                        fGroupText=lambda fz: fz.Series.SeriesName,
+                       fRowHeaderSelect=lambda fz: fz.Series.DirURL+" "+fz.Series.SeriesName,   # As in the alphabetical listing
                        includeRowHeaderCounts=False,
                        #
                        fRowText=lambda fz: "missing "+rowText[fz.Series.DirURL],
@@ -684,6 +695,7 @@ def main():
                        #
                        fGroupURL=lambda fz: fz.Series.DirURL,
                        fGroupText=lambda fz: fz.Series.SeriesName,
+                       fRowHeaderSelect=lambda fz: fz.Series.DirURL+" "+fz.Series.SeriesName,   # As in the alphabetical listing
                        includeRowHeaderCounts=False,
                        #
                        fRowText=lambda fz: rowText[fz.Series.DirURL],
@@ -1080,7 +1092,14 @@ def SortFanacIssueListByTitle(fanacIssueListByTitle):
     # Sorts in place on fanzine's Series name+Series title (added to disambiguate similarly-named fanzines
     # The leading articles must come off the series name *before* the editor is appended: RemoveArticles() has a special case which preserves
     # a name that is nothing but an article, and appending the editor first hides that name from it, leaving the editor as the whole sort key.
-    fanacIssueListByTitle.sort(key=lambda elem: FlattenTextForSorting(elem.SeriesName, RemoveLeadingArticles=True)+" "+FlattenTextForSorting(elem.SeriesEditor))
+    # The directory is the second element of the key rather than more text on the end of the first, so that it
+    # settles exact ties and nothing else: appending it to the string moved "A Fanzine for" (ed. Jack Harness)
+    # past "A Fanzine for Jack Harness", whose name and editor run together into the very same text.  A tie is
+    # two series giving both the same name and the same editor -- the two different fanzines called Warp, both
+    # edited by "various", are such a pair -- and breaking it keeps each directory's issues together, which is
+    # what lets the reports give each directory a block of its own.  Without it the two Warps' issues interleave
+    # by their position on their own pages, and every row would start a block.
+    fanacIssueListByTitle.sort(key=lambda elem: (FlattenTextForSorting(elem.SeriesName, RemoveLeadingArticles=True)+" "+FlattenTextForSorting(elem.SeriesEditor), elem.Series.DirURL))
 
 
 # End of main()
