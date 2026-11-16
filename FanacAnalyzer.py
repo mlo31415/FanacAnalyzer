@@ -425,7 +425,7 @@ def main():
                        fGroupURL=lambda fz: fz.Series.URL,
                        fButtonText=lambda fz: AlphaButtonText(fz),
                        fGroupText=lambda fz: fz.SeriesName,
-                       fGroupAnnot=lambda fz: f"<br><small>{fz.SeriesEditor}</small>",
+                       fGroupAnnot=lambda fz: f"<br><small>{fz.SeriesEditor}</small>"+AnnotateClub(fz),
                        # What makes a fanzine one fanzine is its directory rather than its name: fanac.org
                        # holds two different fanzines called Warp, one the New Zealand clubzine and one
                        # Montreal's, and both pages give the editor as "various", so a key of the name and the
@@ -1709,6 +1709,16 @@ def AlphaButtonText(fz: FanzineIssueInfo) -> str:
     if c == " " or c.isdigit():
         return "*"
     return c.upper()
+
+# -------------------------------------------------------------------------
+# The club behind a clubzine, for the line below the editor in the alphabetical listing.  Only a V2 index page
+# names its club, and FanacOrgReaders picks the name up while it reads the page, so a run from the saved fanzine
+# list has none of them.  (See FanacOrgReaders.gSeriesClubs.)
+def AnnotateClub(fz: FanzineIssueInfo) -> str:
+    club=FanacOrgReaders.gSeriesClubs.get(fz.Series.DirURL, "")
+    if club == "":
+        return ""
+    return f"<br><small>{club}</small>"
 
 # -------------------------------------------------------------------------
 # Compute a properly formatted date annotation -- used in calls to WriteTable

@@ -212,6 +212,16 @@ def ReadFanacFanzineIndexPageNew(fanzineName: str, directoryUrl: str, html: str,
     fztype=ExtractBetweenHTMLComments(html, "type")
     isnewszines="Newszine" == fztype
 
+    # A Clubzine's page names the club just under the editor, in a comment pair of its own:
+    #       <!--club--> - Montreal Science Fiction and Fantasy Association (MonSFFA),<!--club-->
+    # The reports want the club by itself, so the dash the page writes in front of it and any trailing
+    # punctuation come off.  (See gSeriesClubs, below.)
+    if "clubzine" in fztype.lower():
+        club=ExtractBetweenHTMLComments(html, "club")
+        club=re.sub(r"^\s*[-–—]+\s*", "", club).strip().rstrip(",;")
+        if club != "":
+            gSeriesClubs[directoryUrl]=club
+
     # Extract any fanac keywords.  They will be of the form:
     #       <! fanac-keywords: xxxxx -->
     # There may be many of them
@@ -452,6 +462,12 @@ class SeriesNumbering:
     Rows: list[NumberingRow]=field(default_factory=list)        # In page order
 
 gSeriesNumbering: dict[str, SeriesNumbering]={}     # Keyed by the series' directory URL
+
+# The club behind a clubzine, which is likewise something the reports cannot get from FanzineIssueInfo: it is
+# written in the page's own <!--club--> comment pair, and only a V2 page has one.  ReadFanacFanzineIndexPageNew()
+# fills this in as it reads each page and the alphabetical listing reads it back.  Like gSeriesNumbering, it is
+# built during the read, so it is empty on a run using the saved fanzine list.
+gSeriesClubs: dict[str, str]={}     # Keyed by the series' directory URL
 
 
 # One of a row's cells as the page wrote it.  (GetCellValueByColHeader's Text is None for a missing cell.)
