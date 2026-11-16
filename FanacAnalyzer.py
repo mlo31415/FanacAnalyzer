@@ -664,7 +664,7 @@ def main():
                        fRowText=lambda fz: "missing "+rowText[fz.Series.DirURL],
                        # How many issues the series' numbering does account for, annotated the way the other
                        # reports annotate a row: a parenthesis in small type after the row's own text.
-                       fRowAnnot=lambda fz: f"have:&nbsp;{rowHeld[fz.Series.DirURL]}",
+                       fRowAnnot=lambda fz: f"have:&nbsp;{Pluralize(rowHeld[fz.Series.DirURL], 'issue')}",
                        #
                        topCountText=f"{len(seriesList):,} fanzine series with gaps in the whole numbers.\n"+timestamp+"\n",
                        reportFilename="control-Header (Needed to complete a series).html",
@@ -782,15 +782,16 @@ def SeriesButtonText(fz: FanzineIssueInfo) -> str:
 # ====================================================================================
 # Break an ascending list of numbers into the runs a reader can take in at a glance: [4, 5, 8, 9, 10, 13]
 # becomes ["4-5", "8-10", "13"].  Returned in pieces rather than as one string so that a caller which has to
-# label each of them -- the volume reports write "V2.3-5" -- can do so.
-def CompressRuns(nums: list[int]) -> list[str]:
+# label each of them -- the volume reports write "V2.3-5" -- can do so.  A prefix, if one is given, goes on
+# each number rather than on each run, which is how an issue number is written: "#8-#10", not "#8-10".
+def CompressRuns(nums: list[int], prefix: str="") -> list[str]:
     runs: list[str]=[]
     i=0
     while i < len(nums):
         j=i
         while j+1 < len(nums) and nums[j+1] == nums[j]+1:
             j+=1
-        runs.append(str(nums[i]) if j == i else f"{nums[i]}-{nums[j]}")
+        runs.append(f"{prefix}{nums[i]}" if j == i else f"{prefix}{nums[i]}-{prefix}{nums[j]}")
         i=j+1
     return runs
 
@@ -1062,7 +1063,7 @@ def AnalyzeSeriesNumbering(fanacIssueList: list[FanzineIssueInfo]) -> tuple[list
 
         missing=[num for num in range(1, HighestNumbered(rows)+1) if num not in present]
         if len(missing) > 0:
-            needed.append((fz, ", ".join(CompressRuns(missing)), len(present)))
+            needed.append((fz, ", ".join(CompressRuns(missing, "#")), len(present)))
 
     return needed, annoying
 
