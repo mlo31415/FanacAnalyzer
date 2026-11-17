@@ -425,7 +425,7 @@ def main():
                        fGroupURL=lambda fz: fz.Series.URL,
                        fButtonText=lambda fz: AlphaButtonText(fz),
                        fGroupText=lambda fz: fz.SeriesName,
-                       fGroupAnnot=lambda fz: f"<br><small>{fz.SeriesEditor}</small>"+AnnotateClub(fz),
+                       fGroupAnnot=lambda fz: AnnotateSmallLine(fz.SeriesEditor)+AnnotateClub(fz),
                        # What makes a fanzine one fanzine is its directory rather than its name: fanac.org
                        # holds two different fanzines called Warp, one the New Zealand clubzine and one
                        # Montreal's, and both pages give the editor as "various", so a key of the name and the
@@ -1711,6 +1711,15 @@ def AlphaButtonText(fz: FanzineIssueInfo) -> str:
     return c.upper()
 
 # -------------------------------------------------------------------------
+# A line of small type under a heading in the alphabetical listing: the editors, or a clubzine's club.  Both are
+# often too long for the narrow left column, and the box is what lets the lines such a line wraps onto close up:
+# the line spacing of a bare <small> is set by the column it sits in rather than by the <small>, so setting
+# line-height on it would do nothing at all.  A box of its own gives those lines their own spacing and leaves
+# the lines above and below it exactly as they were.
+def AnnotateSmallLine(text: str) -> str:
+    return f'<br><span style="display:inline-block; line-height:0.825"><small>{text}</small></span>'
+
+# -------------------------------------------------------------------------
 # The club behind a clubzine, for the line below the editor in the alphabetical listing.  Only a V2 index page
 # names its club, and FanacOrgReaders picks the name up while it reads the page, so a run from the saved fanzine
 # list has none of them.  (See FanacOrgReaders.gSeriesClubs.)
@@ -1718,11 +1727,7 @@ def AnnotateClub(fz: FanzineIssueInfo) -> str:
     club=FanacOrgReaders.gSeriesClubs.get(fz.Series.DirURL, "")
     if club == "":
         return ""
-    # Club names are long and the column is narrow, so most of them wrap.  The inline-block is what lets their
-    # own lines close up: the line spacing of a bare <small> is set by the column it sits in and not by the
-    # <small>, so setting line-height on it would do nothing at all.  Wrapping the club in a box of its own
-    # gives those lines their own spacing and leaves the lines above and below it exactly as they were.
-    return f'<br><span style="display:inline-block; line-height:1.1"><small>{club}</small></span>'
+    return AnnotateSmallLine(club)
 
 # -------------------------------------------------------------------------
 # Compute a properly formatted date annotation -- used in calls to WriteTable
