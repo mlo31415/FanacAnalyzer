@@ -1718,7 +1718,11 @@ def AnnotateClub(fz: FanzineIssueInfo) -> str:
     club=FanacOrgReaders.gSeriesClubs.get(fz.Series.DirURL, "")
     if club == "":
         return ""
-    return f"<br><small>{club}</small>"
+    # Club names are long and the column is narrow, so most of them wrap.  The inline-block is what lets their
+    # own lines close up: the line spacing of a bare <small> is set by the column it sits in and not by the
+    # <small>, so setting line-height on it would do nothing at all.  Wrapping the club in a box of its own
+    # gives those lines their own spacing and leaves the lines above and below it exactly as they were.
+    return f'<br><span style="display:inline-block; line-height:1.1"><small>{club}</small></span>'
 
 # -------------------------------------------------------------------------
 # Compute a properly formatted date annotation -- used in calls to WriteTable
