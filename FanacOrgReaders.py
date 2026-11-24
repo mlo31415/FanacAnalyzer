@@ -235,6 +235,13 @@ def ReadFanacFanzineIndexPageNew(fanzineName: str, directoryUrl: str, html: str,
     seriesName=ExtractBetweenHTMLComments(html, "name")
     seriesName=re.sub(r"</?br/?>", "; ", seriesName, flags=re.IGNORECASE)    # Replace internal <br> with semicolons
 
+    # The page's tags, in a comment pair of its own: "<!--tags-->Tags: Filk, Tolkien<!--tags-->".  They are chosen
+    # in FanzinesEditor from the master list it keeps at the root of the site, a tag can hold no comma, and a page
+    # with no tags has no line at all.  (See gSeriesTags, below.)
+    tags=[x.strip() for x in ExtractBetweenHTMLComments(html, "tags").removeprefix("Tags:").split(",") if x.strip() != ""]
+    if len(tags) > 0:
+        gSeriesTags[directoryUrl]=SeriesTags(seriesName if seriesName != "" else directoryUrl.rstrip("/").split("/")[-1], tags)
+
     editors=ExtractBetweenHTMLComments(html, "eds")
     editors=editors.replace("<br/>", "<br>").replace("\n", "<br>")
     editors=[RemoveHyperlink(x).strip() for x in editors.split("<br>")]
@@ -462,6 +469,17 @@ class SeriesNumbering:
     Rows: list[NumberingRow]=field(default_factory=list)        # In page order
 
 gSeriesNumbering: dict[str, SeriesNumbering]={}     # Keyed by the series' directory URL
+
+# The tags a page carries, under the name the page goes by -- its own <!--name--> when it has one, and its
+# directory when it does not.  Only a V2 page can have tags at all.  ReadFanacFanzineIndexPageNew() fills this in
+# as it reads each page and the tags report reads it back.  Like gSeriesNumbering, it is built during the read,
+# so it is empty on a run using the saved fanzine list.
+@dataclass
+class SeriesTags:
+    PageName: str=""
+    Tags: list[str]=field(default_factory=list)
+
+gSeriesTags: dict[str, SeriesTags]={}       # Keyed by the series' directory URL
 
 # The club behind a clubzine, which is likewise something the reports cannot get from FanzineIssueInfo: it is
 # written in the page's own <!--club--> comment pair, and only a V2 page has one.  ReadFanacFanzineIndexPageNew()

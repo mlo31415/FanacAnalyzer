@@ -608,6 +608,16 @@ def main():
 
     #-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
     #-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+    # The tags the index pages carry, and the master list they are supposed to come from
+    report="tags.txt"
+    if len(reportsToRun) == 0 or report in reportsToRun:
+        Log(f"Begin Report: '{report}'", timestamp=True)
+        WriteTagsReport(os.path.join(reportFilePath, report), timestamp)
+        Log(f"Complete: {report}", timestamp=True)
+
+
+    #-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+    #-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
     # More general stuff: statistics and the like
     # Count the number of distinct fanzine names (not issue names, but names of runs of fanzines.)
     # Create a set of all fanzines run names (the set to eliminate suploicates) and then get its size.
@@ -1610,6 +1620,60 @@ def WriteTxtTable(filename: str,
 
         f.write(CrossReferenceBlocks("￿"))   # Any alternate titles which sort after the last fanzine
     Log(f"WriteTxtTable({filename} completed")
+
+
+# -------------------------------------------------------------------------
+# The tags report: each tag with the fanzine index pages carrying it, and then the tags in the master list which
+# no page uses.
+# A page's tags are read by FanacOrgReaders as it reads the page, so a run from the saved fanzine list has none
+# of them.  The master list is FanzinesEditor's: a comma-separated file at the root of the site being analyzed
+# (see FanzinesEditor/MasterTags.py).  Tags are matched ignoring case, as FanzinesEditor matches them.
+def WriteTagsReport(filename: str, timestamp: str) -> None:
+
+    # Gather the pages under their tags.  Two pages may spell one tag differently, so a tag is gathered under its
+    # folded form and shown as the master list spells it -- or, failing that, as the first page using it does.
+    pagesByTag: dict[str, list[tuple[str, str]]]={}     # Folded tag -> (the page's name, its directory URL)
+    spelling: dict[str, str]={}                         # Folded tag -> the spelling to show it in
+    for url, page in FanacOrgReaders.gSeriesTags.items():
+        for tag in page.Tags:
+            pagesByTag.setdefault(tag.casefold(), []).append((page.PageName, url))
+            spelling.setdefault(tag.casefold(), tag)
+
+    # The master list the pages are supposed to choose their tags from.  fanac.org answers a request for a file
+    # which is not there with a 404 page rather than a failure, and FetchFileFromServer hands back whatever came,
+    # so anything with markup in it means there is no list to read.
+    masterFilename="Master Tags List.txt"       # FanzinesEditor's MasterTags.Filename
+    rootUrl="https://"+Settings().Get("Website URL", default="")
+    master=FetchFileFromServer(rootUrl+"/"+urllib.parse.quote(masterFilename))
+    masterTags: list[str]|None=None
+    if master is not None and "<" not in master:
+        masterTags=[x.strip() for x in master.split(",") if x.strip() != ""]
+        for tag in masterTags:
+            spelling[tag.casefold()]=tag        # Where the master list has a tag, its spelling is the one to show
+
+    with open(filename, "w+", encoding="utf-8") as f:
+        print(timestamp, file=f)
+        print(f"\n{Pluralize(len(pagesByTag), 'tag')} on {Pluralize(len(FanacOrgReaders.gSeriesTags), 'fanzine index page')}", file=f)
+
+        # The tags in alphabetical order, as FanzineEditor orders the master list, and under each the pages in the
+        # alphabetical order the listings use
+        for folded in sorted(pagesByTag, key=lambda x: spelling[x].casefold()):
+            pages=sorted(pagesByTag[folded], key=lambda x: (FlattenTextForSorting(x[0], RemoveLeadingArticles=True), x[1]))
+            print(f"\n{spelling[folded]}   ({Pluralize(len(pages), 'page')})", file=f)
+            for name, url in pages:
+                print(f"   {name:<50} {url}", file=f)
+
+        if masterTags is None:
+            print(f"\n\nThere is no {masterFilename} at {rootUrl} to compare these with.", file=f)
+        else:
+            unused=[tag for tag in masterTags if tag.casefold() not in pagesByTag]
+            print(f"\n\nThe master list holds {Pluralize(len(masterTags), 'tag')}.", file=f)
+            if len(unused) == 0:
+                print("Every tag in it is on some page.", file=f)
+            else:
+                print(f"{Pluralize(len(unused), 'tag')} in it {'is' if len(unused) == 1 else 'are'} on no page:", file=f)
+                for tag in sorted(unused, key=lambda x: x.casefold()):
+                    print(f"   {tag}", file=f)
 
 
 
